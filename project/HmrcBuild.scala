@@ -23,7 +23,7 @@ object HmrcBuild extends Build {
   import uk.gov.hmrc._
   import DefaultBuildSettings._
 
-  val appName = "play-auditing"
+  val appName = "play-auditing-25"
 
   lazy val microservice = Project(appName, file("."))
     .enablePlugins(SbtAutoBuildPlugin, SbtGitVersioning)

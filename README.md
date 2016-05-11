@@ -1,6 +1,6 @@
 # play-auditing
 
-[![Build Status](https://travis-ci.org/hmrc/play-auditing.svg?branch=master)](https://travis-ci.org/hmrc/play-auditing) [ ![Download](https://api.bintray.com/packages/hmrc/releases/play-auditing/images/download.svg) ](https://bintray.com/hmrc/releases/play-auditing/_latestVersion)
+[![Build Status](https://travis-ci.org/hmrc/play-auditing-25.svg?branch=master)](https://travis-ci.org/hmrc/play-auditing-25) [ ![Download](https://api.bintray.com/packages/hmrc/releases/play-auditing-25/images/download.svg) ](https://bintray.com/hmrc/releases/play-auditing-25/_latestVersion)
 
 play-auditing contains code to facilitate creation of audit events and their publication to datastream. This includes both explicit audit events, and implicit audit events via http-verbs.
 
