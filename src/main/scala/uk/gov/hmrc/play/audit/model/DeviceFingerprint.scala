@@ -16,7 +16,7 @@
 
 package uk.gov.hmrc.play.audit.model
 
-import com.ning.http.util.Base64
+import org.apache.commons.codec.binary.Base64
 import play.api.Logger
 import play.api.mvc.RequestHeader
 
@@ -29,7 +29,7 @@ object DeviceFingerprint {
   def deviceFingerprintFrom(request: RequestHeader): String =
     request.cookies.get(deviceFingerprintCookieName).map { cookie =>
       val decodeAttempt = Try {
-        Base64.decode(cookie.value)
+        Base64.decodeBase64(cookie.value)
       }
       decodeAttempt.failed.foreach { e => Logger.info(s"Failed to decode device fingerprint '${cookie.value}' caused by '${e.getClass.getSimpleName}:${e.getMessage}'")}
       decodeAttempt.map {

@@ -17,5 +17,6 @@
 package uk.gov.hmrc.play.test
 
 import controllers.AssetsBuilder
+import play.api.http.LazyHttpErrorHandler
 
-object AssetsTestController extends AssetsBuilder
+object AssetsTestController extends AssetsBuilder(LazyHttpErrorHandler)

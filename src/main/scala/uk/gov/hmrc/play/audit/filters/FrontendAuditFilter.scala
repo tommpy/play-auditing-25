@@ -44,7 +44,7 @@ trait FrontendAuditFilter extends AuditFilter {
       val next = nextFilter(requestHeader)
       implicit val hc = HeaderCarrier.fromHeadersAndSession(requestHeader.headers, Some(requestHeader.session))
 
-      def performAudit(requestBody: Array[Byte], maybeResult: Try[Result]): Unit = {
+      def performAudit(requestBody: String, maybeResult: Try[Result]): Unit = {
         maybeResult match {
           case Success(result) =>
             val responseHeader = result.header
@@ -52,22 +52,19 @@ trait FrontendAuditFilter extends AuditFilter {
               auditConnector.sendEvent(
                 dataEvent(EventTypes.RequestReceived, requestHeader.uri, requestHeader)
                   .withDetail(ResponseMessage -> filterResponseBody(responseHeader, new String(responseBody)), StatusCode -> responseHeader.status.toString)
-                  .withDetail(buildRequestDetails(requestHeader, new String(requestBody)).toSeq: _*)
+                  .withDetail(buildRequestDetails(requestHeader, requestBody).toSeq: _*)
                   .withDetail(buildResponseDetails(responseHeader).toSeq: _*))
             }
           case Failure(f) =>
             auditConnector.sendEvent(
               dataEvent(EventTypes.RequestReceived, requestHeader.uri, requestHeader)
                 .withDetail(FailedRequestMessage -> f.getMessage)
-                .withDetail(buildRequestDetails(requestHeader, new String(requestBody)).toSeq: _*))
+                .withDetail(buildRequestDetails(requestHeader, requestBody).toSeq: _*))
         }
       }
 
       if (needsAuditing(requestHeader)) {
-        val requestBodyPromise = Promise[Array[Byte]]
-
-        val responseCapture = captureResult(next, requestBodyPromise.future)(performAudit)
-        captureRequestBody(responseCapture, requestBodyPromise)
+        onCompleteWithInput(next)(performAudit)
       }
       else next
     }
@@ -142,6 +139,7 @@ trait FrontendAuditFilter extends AuditFilter {
   private def cleanQueryStringForDatastream(queryString: String): String = {
     queryString.trim match {
       case "" => "-"
+      case ":" => "-" // play 2.5 FakeRequest now parses an empty query string into a two empty string params
       case _ => queryString.trim
     }
   }

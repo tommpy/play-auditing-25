@@ -16,16 +16,20 @@
 
 package uk.gov.hmrc.play.audit.filters
 
+import akka.actor.ActorSystem
+import akka.stream.ActorMaterializer
 import org.scalatest.concurrent.{Eventually, ScalaFutures}
+import org.scalatest.time.{Millis, Seconds, Span}
 import org.scalatest.{Matchers, WordSpecLike}
+import play.api.libs.iteratee.Iteratee
+import play.api.mvc.Result
 import play.api.test.Helpers._
 import play.api.test.{FakeApplication, FakeRequest}
 import uk.gov.hmrc.play.audit.EventTypes
 import uk.gov.hmrc.play.audit.http.connector.{AuditConnector, AuditResult, MockAuditConnector}
-import uk.gov.hmrc.play.audit.model.{DataEvent, AuditEvent}
+import uk.gov.hmrc.play.audit.model.{AuditEvent, DataEvent}
 import uk.gov.hmrc.play.http.HeaderCarrier
 import uk.gov.hmrc.play.test.Concurrent.await
-
 import uk.gov.hmrc.play.test.Http._
 
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -39,6 +43,8 @@ class AuditFilterSpec extends WordSpecLike with Matchers with Eventually with Sc
     val xRequestId = "A_REQUEST_ID"
     val xSessionId = "A_SESSION_ID"
     val deviceID = "A_DEVICE_ID"
+
+    val config = PatienceConfig(Span(5, Seconds), Span(15, Millis))
 
     implicit val hc = HeaderCarrier
     val request = FakeRequest().withHeaders("X-Request-ID" -> xRequestId, "X-Session-ID" -> xSessionId, "deviceID" -> deviceID)
@@ -63,7 +69,11 @@ class AuditFilterSpec extends WordSpecLike with Matchers with Eventually with Sc
       val mockAuditConnector = createAuditConnector
       val auditFilter = createAuditFilter(mockAuditConnector)
 
+      implicit val system = ActorSystem()
+      implicit val materializer = ActorMaterializer()
+
       val result = await(auditFilter.apply(nextAction)(request).run)
+
       await(enumerateResponseBody(result))
 
       eventually {
@@ -75,7 +85,8 @@ class AuditFilterSpec extends WordSpecLike with Matchers with Eventually with Sc
         events(0).tags("X-Request-ID") shouldBe xRequestId
         events(0).tags("X-Session-ID") shouldBe xSessionId
         events(0).asInstanceOf[DataEvent].detail("deviceID") shouldBe deviceID
-      }
+        events(0).asInstanceOf[DataEvent].detail("responseMessage") shouldBe actionNotFoundMessage
+      } (config)
     }
 
     "audit a response even when an action futher down the chain throws an exception" in running(FakeApplication()) {
@@ -83,6 +94,8 @@ class AuditFilterSpec extends WordSpecLike with Matchers with Eventually with Sc
       val auditFilter = createAuditFilter(mockAuditConnector)
 
       a[RuntimeException] should be thrownBy await(auditFilter.apply(exceptionThrowingAction)(request).run)
+
+      implicit val config = PatienceConfig(Span(5, Seconds), Span(15, Millis))
 
       eventually {
         val events = mockAuditConnector.events
@@ -93,7 +106,7 @@ class AuditFilterSpec extends WordSpecLike with Matchers with Eventually with Sc
         events(0).tags("X-Request-ID") shouldBe xRequestId
         events(0).tags("X-Session-ID") shouldBe xSessionId
         events(0).asInstanceOf[DataEvent].detail("deviceID") shouldBe deviceID
-      }
+      } (config)
     }
   }
 }
