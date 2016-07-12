@@ -16,112 +16,112 @@
 
 package uk.gov.hmrc.play.audit.http
 
-import org.scalatest.{Matchers, WordSpecLike}
-import play.api.mvc.{RequestHeader, Result, Results}
-import play.api.{GlobalSettings, PlayException}
+import org.mockito.Mockito._
+import org.scalatest.mock.MockitoSugar
+import org.scalatest.{OneInstancePerTest, Matchers, WordSpecLike}
+import play.api.PlayException
+import play.api.http.HttpErrorHandler
+import play.api.mvc.{RequestHeader, Result}
 import uk.gov.hmrc.play.audit.EventTypes
-import uk.gov.hmrc.play.audit.http.config.ErrorAuditingSettings
+import uk.gov.hmrc.play.audit.http.config.{AuditConnectorProvider, AuditingErrorHandler}
 import uk.gov.hmrc.play.audit.http.connector.{AuditConnector, MockAuditConnector}
 import uk.gov.hmrc.play.http.{JsValidationException, NotFoundException}
 import uk.gov.hmrc.play.test.Concurrent.await
 import uk.gov.hmrc.play.test.DummyRequestHeader
+import org.mockito.Matchers._
+import play.api.mvc.Results._
 
 import scala.concurrent.Future
 
-class ErrorAuditingSettingsSpec extends WordSpecLike with Matchers {
+class ErrorAuditingSettingsSpec extends WordSpecLike with Matchers with MockitoSugar with OneInstancePerTest {
+  import EventTypes._
 
-  trait ParentHandler extends GlobalSettings with Results {
-    var onBadRequestCalled = false
+  val mockSuperHandler = mock[HttpErrorHandler]
+  when(mockSuperHandler.onClientError(any(), any(), any())).thenReturn(Future.successful(Ok))
+  when(mockSuperHandler.onServerError(any(), any())).thenReturn(Future.successful(Ok))
 
-    override def onBadRequest(request: RequestHeader, error: String): Future[Result] = {
-      onBadRequestCalled = true
-      Future.successful(BadRequest)
+  trait ParentHandler extends HttpErrorHandler {
+    override def onClientError(request: RequestHeader, statusCode: Int, message: String): Future[Result] = {
+      mockSuperHandler.onClientError(request, statusCode, message)
     }
 
-    var onHandlerNotFoundCalled = false
-
-    override def onHandlerNotFound(request: RequestHeader): Future[Result] = {
-      onHandlerNotFoundCalled = true
-      Future.successful(NotFound)
-    }
-
-    var onErrorCalled = false
-
-    override def onError(request: RequestHeader, ex: Throwable): Future[Result] = {
-      onErrorCalled = true
-      Future.successful(InternalServerError)
+    override def onServerError(request: RequestHeader, exception: Throwable): Future[Result] = {
+      mockSuperHandler.onServerError(request, exception)
     }
   }
 
-  class TestErrorAuditing(override val auditConnector: AuditConnector) extends ParentHandler with ErrorAuditingSettings {
+  class TestErrorAuditing(val auditConnector: AuditConnector) extends ParentHandler
+    with AuditingErrorHandler
+    with HttpAuditEvent
+    with AuditConnectorProvider {
     override lazy val appName = "app"
   }
 
+  private val header: DummyRequestHeader = new DummyRequestHeader()
   "in a case of application error we" should {
 
     "send ServerInternalError event to DataStream for an Exception that occurred in the microservice" in {
       val mockConnector = new MockAuditConnector
       val auditing = new TestErrorAuditing(mockConnector)
 
-      val resultF = auditing.onError(new DummyRequestHeader(), new PlayException("", "", new Exception("a generic application exception")))
+      val resultF = auditing.onServerError(header, new PlayException("", "", new Exception("a generic application exception")))
       await(resultF)
       mockConnector.recordedEvent shouldNot be(None)
-      mockConnector.recordedEvent.map(_.auditType shouldBe EventTypes.ServerInternalError)
+      mockConnector.recordedEvent.get.auditType shouldBe ServerInternalError
     }
 
     "send ResourceNotFound event to DataStream for a NotFoundException that occurred in the microservice" in {
       val mockConnector = new MockAuditConnector()
       val auditing = new TestErrorAuditing(mockConnector)
 
-      val resultF = auditing.onError(new DummyRequestHeader(), new PlayException("", "", new NotFoundException("test")))
+      val resultF = auditing.onServerError(header, new PlayException("", "", new NotFoundException("test")))
       await(resultF)
       mockConnector.recordedEvent shouldNot be(None)
-      mockConnector.recordedEvent.map(_.auditType shouldBe EventTypes.ResourceNotFound)
+      mockConnector.recordedEvent.get.auditType shouldBe ResourceNotFound
     }
 
     "send ServerValidationError event to DataStream for a JsValidationException that occurred in the microservice" in {
       val mockConnector = new MockAuditConnector()
       val auditing = new TestErrorAuditing(mockConnector)
 
-      val resultF = auditing.onError(new DummyRequestHeader(), new PlayException("", "", new JsValidationException("GET", "", classOf[String], Seq.empty)))
+      val resultF = auditing.onServerError(header, new PlayException("", "", new JsValidationException("GET", "", classOf[String], Seq.empty)))
       await(resultF)
       mockConnector.recordedEvent shouldNot be(None)
-      mockConnector.recordedEvent.map(_.auditType shouldBe EventTypes.ServerValidationError)
+      mockConnector.recordedEvent.get.auditType shouldBe ServerValidationError
     }
 
     "chain onError call to parent" in {
       val mockConnector = new MockAuditConnector()
       val auditing = new TestErrorAuditing(mockConnector)
 
-      val resultF = auditing.onError(new DummyRequestHeader(), new PlayException("", "", new NotFoundException("test")))
+      val exception = new PlayException("", "", new NotFoundException("test"))
+      val resultF = auditing.onServerError(header, exception)
       await(resultF)
-      auditing.onErrorCalled shouldBe true
+      verify(mockSuperHandler).onServerError(header, exception)
     }
 
   }
 
   "in a case of the microservice endpoint not being found we" should {
-
     "send ResourceNotFound event to DataStream" in {
 
       val mockConnector = new MockAuditConnector()
       val auditing = new TestErrorAuditing(mockConnector)
 
-      val resultF = auditing.onHandlerNotFound(new DummyRequestHeader())
+      val resultF = auditing.onClientError(header, 404, "")
       await(resultF)
       mockConnector.recordedEvent shouldNot be(None)
-      mockConnector.recordedEvent.map(_.auditType shouldBe EventTypes.ResourceNotFound)
+      mockConnector.recordedEvent.get.auditType shouldBe EventTypes.ResourceNotFound
     }
 
     "chain onHandlerNotFound call to parent" in {
       val mockConnector = new MockAuditConnector()
       val auditing = new TestErrorAuditing(mockConnector)
 
-      val resultF = auditing.onHandlerNotFound(new DummyRequestHeader())
+      val resultF = auditing.onClientError(header, 404, "")
       await(resultF)
-      auditing.onHandlerNotFoundCalled shouldBe true
+      verify(mockSuperHandler).onClientError(header, 404, "")
     }
-
   }
 
   "in a case of incorrect data being sent to the microservice endpoint we" should {
@@ -130,20 +130,19 @@ class ErrorAuditingSettingsSpec extends WordSpecLike with Matchers {
       val mockConnector = new MockAuditConnector()
       val auditing = new TestErrorAuditing(mockConnector)
 
-      val resultF = auditing.onBadRequest(new DummyRequestHeader(), "error message")
+      val resultF = auditing.onClientError(header, 400, "")
       await(resultF)
       mockConnector.recordedEvent shouldNot be(None)
-      mockConnector.recordedEvent.map(_.auditType shouldBe EventTypes.ServerValidationError)
+      mockConnector.recordedEvent.get.auditType shouldBe EventTypes.ServerValidationError
     }
 
     "chain onBadRequest call to parent" in {
       val mockConnector = new MockAuditConnector()
       val auditing = new TestErrorAuditing(mockConnector)
 
-      val resultF = auditing.onBadRequest(new DummyRequestHeader(), "error message")
+      val resultF = auditing.onClientError(header, 400, "")
       await(resultF)
-      auditing.onBadRequestCalled shouldBe true
+      verify(mockSuperHandler).onClientError(header, 400, "")
     }
   }
-
 }
